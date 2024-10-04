@@ -2,17 +2,18 @@
 # comercializada em 2015, por tipo de fluxo. Considerar somente transações com Number of
 # items, em que é possível calcular o peso por unidade e o valor por quilo.
 
-import sys
+from mrjob.job import MRJob
+from mrjob.step import MRStep
 
-def mapper(input_data):
-    mapped_data = []
-    for line in input_data:
+class MostProfitableCommodityPerWeight(MRJob):
+
+    def mapper(self, _, line):
         line = line.strip()
         if line.startswith('country_or_area;'):
-            continue
+            return  # Skip header
         fields = line.split(';')
         if len(fields) != 10:
-            continue
+            return  # Skip invalid lines
         year = fields[1]
         flow = fields[4]
         commodity = fields[3]
@@ -21,42 +22,47 @@ def mapper(input_data):
         quantity_name = fields[7]
         quantity = fields[8]
         if (year == '2015' and quantity_name == 'Number of items' and
-            weight_kg != '' and quantity != '' and trade_usd != ''):
+            weight_kg and quantity and trade_usd):
             try:
                 trade_usd = float(trade_usd)
                 weight_kg = float(weight_kg)
                 quantity = float(quantity)
                 if weight_kg > 0 and quantity > 0:
                     value_per_kg = trade_usd / weight_kg
-                    mapped_data.append(((flow, commodity), value_per_kg))
+                    key = (flow, commodity)
+                    yield key, value_per_kg
             except ValueError:
-                continue  # Skip lines with invalid numerical values
-    return mapped_data
+                pass  # Skip lines with invalid numerical values
 
-def combiner(mapped_data):
-    combined_data = {}
-    for key, value_per_kg in mapped_data:
-        max_value_per_kg = combined_data.get(key, 0.0)
-        if value_per_kg > max_value_per_kg:
-            combined_data[key] = value_per_kg
-    combined_list = list(combined_data.items())
-    return combined_list
+    def combiner(self, key, values):
+        # Keep the maximum value_per_kg for each key (flow, commodity)
+        max_value_per_kg = max(values)
+        yield key, max_value_per_kg
 
-def reducer(combined_data):
-    max_values = {}
-    for key, value_per_kg in combined_data:
+    def reducer_find_max_per_commodity(self, key, values):
+        # For each key (flow, commodity), keep the maximum value_per_kg
+        max_value_per_kg = max(values)
         flow, commodity = key
-        max_value_per_kg, max_commodity = max_values.get(flow, (0.0, ''))
-        if value_per_kg > max_value_per_kg:
-            max_values[flow] = (value_per_kg, commodity)
-    with open('Atividade8_output.csv', 'w') as f_out:
-        f_out.write('flow,commodity,value_per_kg\n')
-        for flow in sorted(max_values):
-            value_per_kg, commodity = max_values[flow]
-            f_out.write(f'{flow},{commodity},{value_per_kg}\n')
+        yield flow, (max_value_per_kg, commodity)
+
+    def reducer_find_most_profitable(self, flow, value_commodity_pairs):
+        # For each flow, find the commodity with the highest value_per_kg
+        max_value_per_kg = 0.0
+        max_commodity = ''
+        for value_per_kg, commodity in value_commodity_pairs:
+            if value_per_kg > max_value_per_kg:
+                max_value_per_kg = value_per_kg
+                max_commodity = commodity
+        # Output: flow, commodity, value_per_kg
+        yield flow, (max_commodity, max_value_per_kg)
+
+    def steps(self):
+        return [
+            MRStep(mapper=self.mapper,
+                   combiner=self.combiner,
+                   reducer=self.reducer_find_max_per_commodity),
+            MRStep(reducer=self.reducer_find_most_profitable)
+        ]
 
 if __name__ == '__main__':
-    input_data = sys.stdin.readlines()
-    mapped = mapper(input_data)
-    combined = combiner(mapped)
-    reducer(combined)
+    MostProfitableCommodityPerWeight.run()
