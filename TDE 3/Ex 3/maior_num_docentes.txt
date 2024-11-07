@@ -1,0 +1,1 @@
+Escola com o maior número de docentes: Row(NO_ENTIDADE='EDUCACAO INFANTIL MUNICIPAL BALAO MAGICO', NO_MUNICIPIO='Bom Jardim de Minas', TOTAL_DOCENTES=623)
